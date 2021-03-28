@@ -6,14 +6,17 @@ CCOBJFLAG := $(CCFLAG) -c
 BIN_PATH := out
 SRC_PATH := ../src
 
-TARGET_NAME := nr_micro_shell
+TARGET_NAME := nr_micro_shell_test
 
 TARGET := $(BIN_PATH)/$(TARGET_NAME)
 TARGET_DEBUG := $(BIN_PATH)/$(TARGET_NAME)_db
 
 INC :=	../../inc/
 
-SRC := 	simulator.c \
+SRC := 	test.c \
+		../nr_micro_shell_commands.c \
+		../../src/ansi_port.c \
+		../../src/ansi.c \
 		../../src/nr_micro_shell.c
 
 default : all
@@ -21,7 +24,7 @@ default : all
 .PHONY: all
 all: 
 	@rm -f $(TARGET)
-	$(CC) $(CCFLAG) -I $(INC) -D NR_MICRO_SHELL_SIMULATOR $(SRC) -l curses -o $(TARGET)
+	$(CC) $(CCFLAG) -I $(INC) -D NR_MICRO_SHELL_SIMULATOR $(SRC) -o $(TARGET)
 
 .PHONY: debug
 debug: 

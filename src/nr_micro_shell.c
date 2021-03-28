@@ -1,371 +1,316 @@
-/**
- * @file      nr_micro_shell.c
- * @author    Ji Youzhou
- * @version   V0.1
- * @date      28 Oct 2019
- * @brief     [brief]
- * *****************************************************************************
- * @attention
- * 
- * MIT License
- * 
- * Copyright (C) 2019 Ji Youzhou. or its affiliates.  All Rights Reserved.
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-
-/* Includes ------------------------------------------------------------------*/
+#include <stdint.h>
 #include "nr_micro_shell.h"
-#include <string.h>
-#include <ctype.h>
 
+/* ref form Linus Torvalds */
 
-NR_SHELL_CMD_EXPORT_START(0,NULL);
-NR_SHELL_CMD_EXPORT_END(n,NULL);
+#define NUL 0x00
+#define SOH 0x01
+#define STX 0x02
+#define ETX 0x03
+#define EOT 0x04
+#define ENQ 0x05
+#define ACK 0x06
+#define BEL 0x07
+#define BS 0x08
+#define HT 0x09
+#define LF 0x0A
+#define VT 0x0B
+#define FF 0x0C
+#define CR 0x0D
+#define SO 0x0E
+#define SI 0x0F
+#define DLE 0x10
+#define DC1 0x11
+#define DC2 0x12
+#define DC3 0x13
+#define DC4 0x14
+#define NAK 0x15
+#define SYN 0x16
+#define ETB 0x17
+#define CAN 0x18
+#define EM 0x19
+#define SUB 0x1A
+#define ESC 0x1B
+#define FS 0x1C
+#define GS 0x1D
+#define RS 0x1E
+#define US 0x1F
+#define DEL 0x7F
+#define CSI 0x9B
 
-shell_st nr_shell =
-    {
-        .user_name = NR_SHELL_USER_NAME,
-        .static_cmd = nr_cmd_start_add,
+const char vt100[] = {
+	"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+	"\0\0\0\0\0\0\0\0\0\0\376\0\0\0\0\0"
+	" !\"#$%&'()*+,-./0123456789:;<=>?"
+	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
+	"`abcdefghijklmnopqrstuvwxyz{|}~\0"
+	"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+	"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+	"\377\255\233\234\376\235\174\025\376\376\246\256\252\055\376\376"
+	"\370\361\375\376\376\346\024\371\376\376\247\257\254\253\376\250"
+	"\376\376\376\376\216\217\222\200\376\220\376\376\376\376\376\376"
+	"\376\245\376\376\376\376\231\376\350\376\376\376\232\376\376\341"
+	"\205\240\203\376\204\206\221\207\212\202\210\211\215\241\214\213"
+	"\376\244\225\242\223\376\224\366\355\227\243\226\201\376\376\230",
 };
 
-static char *nr_shell_strtok(char *string_org, const char *demial)
+static void cons_put_chars(v_cons_st *cons, char *str, int size)
 {
-	static unsigned char *last;
-	unsigned char *str;
-	const unsigned char *ctrl = (const unsigned char *)demial;
-	unsigned char map[32];
-	int count;
+	int i = 0;
+	for (i = 0; i < size; i++) {
+		nr_shell_putc(*(str + i), cons->id);
+	}
+}
 
-	for (count = 0; count < 32; count++)
-	{
-		map[count] = 0;
+static void cons_put_str(v_cons_st *cons, char *str)
+{
+	int i = 0;
+	for (i = 0; str[i] != '\0'; i++)
+		nr_shell_putc(str[i], cons->id);
+}
+
+static void screen_clean(v_cons_st *cons, int x)
+{
+	cons->pos = cons->scr_mem_start;
+	cons->x = 0;
+	cons->y = 0;
+}
+
+static void screen_new(v_cons_st *cons, int x)
+{
+}
+
+static void screen_up(v_cons_st *cons, int x)
+{
+}
+
+static void screen_down(v_cons_st *cons, int x)
+{
+}
+
+/* CR move the cursor to the left */
+static void cr(v_cons_st *cons)
+{
+	cons->pos -= cons->x;
+	cons->x = 0;
+	cons->need_wrap = 0;
+}
+
+/* LF move the cursor to next line */
+static void lf(v_cons_st *cons)
+{
+	if (cons->y + 1 < cons->row_size) {
+		cons->y++;
+		cons->pos += cons->row_size;
+	} else {
+		screen_up(cons, 1);
+		cons->need_wrap = 0;
 	}
-	do
-	{
-		map[*ctrl >> 3] |= (1 << (*ctrl & 7));
-	} while (*ctrl++);
-	if (string_org)
-	{
-		str = (unsigned char *)string_org;
+}
+
+/* BS move the cursor forward one space */
+static void bs(v_cons_st *cons)
+{
+	if (cons->x) {
+		cons->pos--;
+		cons->x--;
+		cons->need_wrap = 0;
 	}
-	else
-	{
-		str = last;
+}
+
+static void del(v_cons_st *cons)
+{
+	if (cons->x) {
 	}
-	while ((map[*str >> 3] & (1 << (*str & 7))) && *str)
-	{
-		str++;
-	}
-	string_org = (char *)str;
-	for (; *str; str++)
-	{
-		if (map[*str >> 3] & (1 << (*str & 7)))
-		{
-			*str++ = '\0';
-			break;
+}
+
+static void insert_char(v_cons_st *cons)
+{
+}
+
+static void gotoxy(v_cons_st *cons, int x, int y)
+{
+	x = x < 0 ? 0 : x;
+	x = x >= cons->col_size ? cons->col_size - 1 : x;
+
+	y = y < 0 ? 0 : y;
+	y = y >= cons->row_size ? cons->row_size - 1 : x;
+
+}
+
+static void csi_J(v_cons_st *cons, int par)
+{
+}
+
+static void csi_K(v_cons_st *cons, int par)
+{
+}
+
+void dump_src_mem(v_cons_st *cons)
+{
+	int i = 0;
+	int j = 0;
+	int k = 0;
+	printf("\r\n");
+	printf("\r\n===========================================================================================\r\n");
+
+	for (i = 0; i < cons->y; i++) {
+		for (j = 0; j < cons->col_size; j++) {
+			nr_shell_putc(cons->scr_mem_start[k], cons->id);
+			k++;
 		}
+		printf("\r\n");
 	}
-	last = str;
-	if (string_org == (char *)str)
-	{
-		return NULL;
+
+	for (j = 0; j <= cons->x; j++) {
+		nr_shell_putc(cons->scr_mem_start[k], cons->id);
+		k++;
 	}
-	else
-	{
-		return string_org;
-	}
+	printf("\r\n===========================================================================================\r\n");
+	printf("x:%d, y:%d\n", cons->x, cons->y);
+	printf("\r\n");
+	fflush(stdout);
 }
 
-void _shell_init(shell_st *shell)
+__weak void bell(void)
 {
-
-#ifdef NR_SHELL_SHOW_LOG
-	shell_printf(" _   _ ____    __  __ _                  ____  _          _ _ \r\n");
-	shell_printf("| \\ | |  _ \\  |  \\/  (_) ___ _ __ ___   / ___|| |__   ___| | |\r\n");
-	shell_printf("|  \\| | |_) | | |\\/| | |/ __| '__/ _ \\  \\___ \\| '_ \\ / _ \\ | |\r\n");
-	shell_printf("| |\\  |  _ <  | |  | | | (__| | | (_) |  ___) | | | |  __/ | |\r\n");
-	shell_printf("|_| \\_|_| \\_\\ |_|  |_|_|\\___|_|  \\___/  |____/|_| |_|\\___|_|_|\r\n");
-	shell_printf("                                                              \r\n");
-#endif
-
-	shell_printf("%s",shell->user_name);
-	shell_his_queue_init(&shell->cmd_his);
-	shell_his_queue_add_cmd(&shell->cmd_his, "ls cmd");
-	shell->cmd_his.index = 1;
 }
 
-shell_fun_t shell_search_cmd(shell_st *shell, char *str)
+void write_to_console(v_cons_st *cons, uint8_t c)
 {
-	unsigned int i = 0;
-	while (shell->static_cmd[i].fp != NULL)
-	{
-		if (!strcmp(str, shell->static_cmd[i].cmd))
-		{
-			return shell->static_cmd[i].fp;
+	if (cons->en == CONS_DISABLE)
+		return;
+
+	if (cons->state == ESnormal && cons->trans_table[c]) {
+		if (cons->insert)
+			insert_char(cons);
+		c = cons->trans_table[c];
+		*cons->pos = c;
+		if (cons->x == cons->col_size)
+			cons->need_wrap = cons->auto_wrap;
+		else {
+			cons->x++;
+			cons->pos++;
 		}
-		i++;
-	}
-
-	return NULL;
-}
-
-void shell_parser(shell_st *shell, char *str)
-{
-	char argc = 0;
-	char argv[NR_SHELL_CMD_LINE_MAX_LENGTH + NR_SHELL_CMD_PARAS_MAX_NUM];
-	char *token = str;
-	shell_fun_t fp;
-	char index = NR_SHELL_CMD_PARAS_MAX_NUM;
-
-	if (shell_his_queue_search_cmd(&shell->cmd_his, str) == 0 && str[0] != '\0')
-	{
-		shell_his_queue_add_cmd(&shell->cmd_his, str);
-	}
-
-	if (strlen(str) > NR_SHELL_CMD_LINE_MAX_LENGTH)
-	{
-		shell_printf("this command is too long."NR_SHELL_NEXT_LINE);
-		shell_printf("%s",shell->user_name);
 		return;
 	}
 
-	token = nr_shell_strtok(token, " ");
-	fp = shell_search_cmd(shell, str);
-
-	if (fp == NULL)
-	{
-		if (isalpha(str[0]))
-		{
-			shell_printf("no command named: %s"NR_SHELL_NEXT_LINE, token);
-		}
-	}
-	else
-	{
-		argv[argc] = index;
-		strcpy(argv + index, str);
-		index += strlen(str) + 1;
-		argc++;
-
-		token = nr_shell_strtok(NULL, " ");
-		while (token != NULL)
-		{
-			argv[argc] = index;
-			strcpy(argv + index, token);
-			index += strlen(token) + 1;
-			argc++;
-			token = nr_shell_strtok(NULL, " ");
-		}
-	}
-
-	if (fp != NULL)
-	{
-		fp(argc, argv);
-	}
-
-	shell_printf("%s",shell->user_name);
-}
-
-char *shell_cmd_complete(shell_st *shell, char *str)
-{
-	char *temp = NULL;
-	unsigned char i;
-	char *best_matched = NULL;
-	unsigned char min_position = 255;
-
-	for (i = 0; shell->static_cmd[i].cmd[0] != '\0'; i++)
-	{
-		temp = NULL;
-		temp = strstr(shell->static_cmd[i].cmd, str);
-		if (temp != NULL && ((unsigned long)temp - (unsigned long)(&shell->static_cmd[i]) < min_position))
-		{
-			min_position = (unsigned long)temp - (unsigned long)(&shell->static_cmd[i]);
-			best_matched = (char *)&shell->static_cmd[i];
-			if (min_position == 0)
-			{
-				break;
-			}
-		}
-	}
-
-	return best_matched;
-}
-
-void shell_his_queue_init(shell_his_queue_st *queue)
-{
-	queue->fp = 0;
-	queue->rp = 0;
-	queue->len = 0;
-
-	queue->store_front = 0;
-	queue->store_rear = 0;
-	queue->store_num = 0;
-}
-
-void shell_his_queue_add_cmd(shell_his_queue_st *queue, char *str)
-{
-	unsigned short int str_len;
-	unsigned short int i;
-
-	str_len = strlen(str);
-
-	if (str_len > NR_SHELL_CMD_HISTORY_BUF_LENGTH)
-	{
+	switch (c) {
+	case BEL:
+		bell();
+		return;
+	case BS:
+		bs(cons);
+		return;
+	case LF:
+		lf(cons);
+		dump_src_mem(cons);
+		return;
+	case CR:
+		cr(cons);
+		return;
+	case CAN:
+	case SUB:
+		cons->state = ESnormal;
+		return;
+	case ESC:
+		cons->state = ESesc;
+		return;
+	case DEL:
+		del(cons);
+		return;
+	case CSI:
+		cons->state = ESsquare;
 		return;
 	}
 
-	while (str_len > (NR_SHELL_CMD_HISTORY_BUF_LENGTH - queue->store_num) || queue->len == NR_SHELL_MAX_CMD_HISTORY_NUM)
-	{
-
-		queue->fp++;
-		queue->fp = (queue->fp > NR_SHELL_MAX_CMD_HISTORY_NUM) ? 0 : queue->fp;
-		queue->len--;
-
-		if (queue->store_front <= queue->queue[queue->fp])
-		{
-			queue->store_num -= queue->queue[queue->fp] - queue->store_front;
+	switch (cons->state) {
+	case ESesc:
+		cons->state = ESnormal;
+		switch (c) {
+		case '[':
+			cons->state = ESsquare;
+			return;
 		}
-		else
-		{
-			queue->store_num -= queue->queue[queue->fp] + NR_SHELL_CMD_HISTORY_BUF_LENGTH - queue->store_front + 1;
+		return;
+	case ESsquare:
+		for (cons->npara = 0; cons->npara < MAX_NR_CSI_PARA;
+		     cons->npara++)
+			cons->para[cons->npara] = 0;
+		cons->npara = 0;
+		cons->state = ESgetpars;
+	case ESgetpars:
+		if (c == ';' && cons->npara < MAX_NR_CSI_PARA - 1) {
+			cons->npara++;
+			return;
+		} else if (c >= '0' && c <= '9') {
+			cons->para[cons->npara] *= 10;
+			cons->para[cons->npara] += c - '0';
+			return;
+		} else
+			cons->state = ESgotpars;
+	case ESgotpars:
+		switch (c) {
+		case 'G':
+		case '`':
+			if (cons->para[0])
+				cons->para[0]--;
+			gotoxy(cons, cons->para[0], cons->y);
+			return;
+		case 'A':
+			if (!cons->para[0])
+				cons->para[0]++;
+			gotoxy(cons, cons->x, cons->y - cons->para[0]);
+			return;
+		case 'B':
+		case 'e':
+			if (!cons->para[0])
+				cons->para[0]++;
+			gotoxy(cons, cons->x, cons->y + cons->para[0]);
+			return;
+		case 'C':
+		case 'a':
+			if (!cons->para[0])
+				cons->para[0]++;
+			gotoxy(cons, cons->x + cons->para[0], cons->y);
+			return;
+		case 'D':
+			if (!cons->para[0])
+				cons->para[0]++;
+			gotoxy(cons, cons->x - cons->para[0], cons->y);
+			return;
+		case 'E':
+			if (!cons->para[0])
+				cons->para[0]++;
+			gotoxy(cons, 0, cons->y + cons->para[0]);
+			return;
+		case 'F':
+			if (!cons->para[0])
+				cons->para[0]++;
+			gotoxy(cons, 0, cons->y - cons->para[0]);
+			return;
+		case 'd':
+			if (cons->para[0])
+				cons->para[0]--;
+			gotoxy(cons, cons->x, cons->para[0]);
+			return;
+		case 'H':
+		case 'f':
+			if (cons->para[0])
+				cons->para[0]--;
+			if (cons->para[1])
+				cons->para[1]--;
+			gotoxy(cons, cons->para[1], cons->para[0]);
+			return;
+		case 'J':
+			csi_J(cons, cons->para[0]);
+			return;
+		case 'K':
+			csi_K(cons, cons->para[0]);
+			return;
 		}
-
-		queue->store_front = queue->queue[queue->fp];
-	}
-
-	queue->queue[queue->rp] = queue->store_rear;
-	queue->rp++;
-	queue->rp = (queue->rp > NR_SHELL_MAX_CMD_HISTORY_NUM) ? 0 : queue->rp;
-	queue->len++;
-
-	for (i = 0; i < str_len; i++)
-	{
-		queue->buf[queue->store_rear] = str[i];
-		queue->store_rear++;
-		queue->store_rear = (queue->store_rear > NR_SHELL_CMD_HISTORY_BUF_LENGTH) ? 0 : queue->store_rear;
-		queue->store_num++;
-	}
-	queue->queue[queue->rp] = queue->store_rear;
-}
-
-unsigned short int shell_his_queue_search_cmd(shell_his_queue_st *queue, char *str)
-{
-	unsigned short int str_len;
-	unsigned short int i, j;
-	unsigned short int index_temp = queue->fp;
-	unsigned short int start;
-	unsigned short int end;
-	unsigned short int cmd_len;
-	unsigned short int matched_id = 0;
-	unsigned short int buf_index;
-
-	if (queue->len == 0)
-	{
-		return matched_id;
-	}
-	else
-	{
-		str_len = strlen(str);
-		for (i = 0; i < queue->len; i++)
-		{
-			start = queue->queue[index_temp];
-			index_temp++;
-			index_temp = (index_temp > NR_SHELL_MAX_CMD_HISTORY_NUM) ? 0 : index_temp;
-			end = queue->queue[index_temp];
-
-			if (start <= end)
-			{
-				cmd_len = end - start;
-			}
-			else
-			{
-				cmd_len = NR_SHELL_CMD_HISTORY_BUF_LENGTH + 1 - start + end;
-			}
-
-			if (cmd_len == str_len)
-			{
-				matched_id = i + 1;
-				buf_index = start;
-				for (j = 0; j < str_len; j++)
-				{
-					if (queue->buf[buf_index] != str[j])
-					{
-						matched_id = 0;
-						break;
-					}
-
-					buf_index++;
-					buf_index = (buf_index > NR_SHELL_CMD_HISTORY_BUF_LENGTH) ? 0 : buf_index;
-				}
-
-				if (matched_id != 0)
-				{
-					return matched_id;
-				}
-			}
-		}
-
-		return 0;
+		return;
+	default:
+		cons->state = ESnormal;
 	}
 }
-
-void shell_his_copy_queue_item(shell_his_queue_st *queue, unsigned short i, char *str_buf)
-{
-	unsigned short index_temp;
-	unsigned short start;
-	unsigned short end;
-	unsigned short j;
-
-	if (i <= queue->len)
-	{
-		index_temp = queue->fp + i - 1;
-		index_temp = (index_temp > NR_SHELL_MAX_CMD_HISTORY_NUM) ? (index_temp - NR_SHELL_MAX_CMD_HISTORY_NUM - 1) : index_temp;
-
-		start = queue->queue[index_temp];
-		index_temp++;
-		index_temp = (index_temp > NR_SHELL_MAX_CMD_HISTORY_NUM) ? 0 : index_temp;
-		end = queue->queue[index_temp];
-
-		if (start < end)
-		{
-			for (j = start; j < end; j++)
-			{
-				str_buf[j - start] = queue->buf[j];
-			}
-
-			str_buf[j - start] = '\0';
-		}
-		else
-		{
-			for (j = start; j < NR_SHELL_CMD_HISTORY_BUF_LENGTH + 1; j++)
-			{
-				str_buf[j - start] = queue->buf[j];
-			}
-
-			for (j = 0; j < end; j++)
-			{
-				str_buf[j + NR_SHELL_CMD_HISTORY_BUF_LENGTH + 1 - start] = queue->buf[j];
-			}
-
-			str_buf[j + NR_SHELL_CMD_HISTORY_BUF_LENGTH + 1 - start] = '\0';
-		}
-	}
-}
-
-/******************* (C) COPYRIGHT 2019 Ji Youzhou *****END OF FILE*****************/

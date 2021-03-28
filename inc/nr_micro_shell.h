@@ -1,15 +1,15 @@
 /**
  * @file      nr_micro_shell.h
  * @author    Ji Youzhou
- * @version   V0.1
- * @date      28 Oct 2019
+ * @version   V2.0
+ * @date      28 Mar 2021
  * @brief     [brief]
  * *****************************************************************************
  * @attention
  * 
  * MIT License
  * 
- * Copyright (C) 2019 Ji Youzhou. or its affiliates.  All Rights Reserved.
+ * Copyright (C) 2021 Ji Youzhou. or its affiliates.  All Rights Reserved.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,125 +30,102 @@
  * SOFTWARE.
  */
 
-/* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __nr_micro_shell_h
-#define __nr_micro_shell_h
+#ifndef __NR_MICRO_SHELL_H
+#define __NR_MICRO_SHELL_H
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
-    /* Includes ------------------------------------------------------------------*/
-#include "stdio.h"
+/* Includes ------------------------------------------------------------------*/
+#include <stdint.h>
+#include <stdio.h>
 #include "nr_micro_shell_config.h"
-#include "ansi.h"
 
-#ifndef shell_printf
-#define shell_printf(fmt, args...) printf(fmt, ##args);
-#endif
+#define MAX_NR_CSI_PARA 16
 
-    typedef void (*shell_fun_t)(char, char *);
+/* escape sequence mode */
+enum {
+	ESnormal,
+	ESesc,
+	ESsquare,
+	ESgetpars,
+	ESgotpars,
+	ESfunckey,
+	EShash,
+	ESsetG0,
+	ESsetG1,
+	ESignore
+};
 
-    typedef struct static_cmd_function_struct
-    {
-        char cmd[NR_SHELL_CMD_NAME_MAX_LENGTH];
-        void (*fp)(char argc, char *argv);
-        char *description;
-    } static_cmd_st;
+enum { CONS_ENABLE = 1, CONS_DISABLE = 0 };
 
-    typedef struct shell_history_queue_struct
-    {
-        unsigned short int fp;
-        unsigned short int rp;
+typedef struct scr_ops_struct {
+	void (*gotoxy)(uint8_t id, int x, int y);
+}scr_ops_st;
 
-        unsigned short int len;
-        unsigned short int index;
+typedef struct virtual_console_struct {
+	uint32_t x;
+	uint32_t y;
+	uint32_t end_x;
+	uint32_t end_y;
+	uint8_t *pos;
 
-        unsigned short int store_front;
-        unsigned short int store_rear;
-        unsigned short int store_num;
+	uint8_t *scr_mem_start;
 
-        char queue[NR_SHELL_MAX_CMD_HISTORY_NUM + 1];
-        char buf[NR_SHELL_CMD_HISTORY_BUF_LENGTH + 1];
+	uint8_t row_size;
+	uint8_t col_size;
 
-    } shell_his_queue_st;
+	const uint8_t *trans_table;
 
-    typedef struct nr_shell
-    {
-        char user_name[NR_SHELL_USER_NAME_MAX_LENGTH];
-        const static_cmd_st *static_cmd;
-        shell_his_queue_st cmd_his;
-    } shell_st;
+	uint8_t state;
+	uint8_t npara;
+	uint16_t para[MAX_NR_CSI_PARA];
 
-    void _shell_init(shell_st *shell);
-    void shell_parser(shell_st *shell, char *str);
-    char *shell_cmd_complete(shell_st *shell, char *str);
-    void shell_his_queue_init(shell_his_queue_st *queue);
-    void shell_his_queue_add_cmd(shell_his_queue_st *queue, char *str);
-    unsigned short int shell_his_queue_search_cmd(shell_his_queue_st *queue, char *str);
-    void shell_his_copy_queue_item(shell_his_queue_st *queue, unsigned short i, char *str_buf);
+	uint32_t en : 1;
+	uint32_t echo_en : 1;
+	uint32_t need_wrap : 1;
+	uint32_t auto_wrap : 1;
+	uint32_t insert : 1;
 
-    extern shell_st nr_shell;
+	scr_ops_st* src_ops;
 
-#define shell_init()            \
-    {                           \
-        ansi_init(&nr_ansi);    \
-        _shell_init(&nr_shell); \
-    }
+	uint8_t id;
+} v_cons_st;
 
-#if NR_SHELL_END_OF_LINE == 1
-#define NR_SHELL_END_CHAR '\r'
-#else
-#define NR_SHELL_END_CHAR '\n'
-#endif
-	
-#if NR_SHELL_END_OF_LINE == 0
-#define NR_SHELL_NEXT_LINE "\n"
-#endif
+typedef struct nr_shell_struct
+{
+	v_cons_st *cons;
+}nr_shell_st;
 
-#if NR_SHELL_END_OF_LINE == 1
-#define NR_SHELL_NEXT_LINE "\r\n"
-#endif
-	
-#if NR_SHELL_END_OF_LINE == 2
-#define NR_SHELL_NEXT_LINE "\r\n"
-#endif
+void write_to_console(v_cons_st *cons, uint8_t c);
+void dump_src_mem(v_cons_st *cons);
 
-#define shell(c)                                             \
-    {                                                        \
-        if (ansi_get_char(c, &nr_ansi) == NR_SHELL_END_CHAR) \
-        {                                                    \
-            shell_parser(&nr_shell, nr_ansi.current_line);   \
-            ansi_clear_current_line(&nr_ansi);               \
-        }                                                    \
-    }
+extern const char vt100[];
 
-#ifdef USING_RT_THREAD
-    int rt_nr_shell_system_init(void);
-#endif
-
-#define NR_USED __attribute__((used))
-#define NR_SECTION(x) __attribute__((section(".rodata.nr_shell_cmd" x)))
-#define NR_SHELL_CMD_EXPORT_START(cmd, func) \
-    NR_USED const static_cmd_st _nr_cmd_start_ NR_SECTION("0.end") = {#cmd, NULL}
-#define NR_SHELL_CMD_EXPORT(cmd, func) \
-    NR_USED const static_cmd_st _nr_cmd_##cmd NR_SECTION("1") = {#cmd, func}
-#define NR_SHELL_CMD_EXPORT_END(cmd, func) \
-    NR_USED const static_cmd_st _nr_cmd_end_ NR_SECTION("1.end") = {#cmd, NULL}
-
-    
-#ifdef NR_SHELL_USING_EXPORT_CMD
-	extern const static_cmd_st _nr_cmd_start_;
-#define nr_cmd_start_add (&_nr_cmd_start_+1)
-#else
-	extern const static_cmd_st static_cmd[];
-#define nr_cmd_start_add (&static_cmd[0])
-#endif
+#define VCONS_DEFAULT_COLS 80
+#define VCONS_DEFAULT_ROWS 80
+#define  DECLARE_AND_DEFAULT_NR_SHELL(name)\
+uint8_t name##_scr_buf[VCONS_DEFAULT_COLS*VCONS_DEFAULT_ROWS];\
+v_cons_st name##_vcons = {\
+	.x = 0,\
+	.y = 0,\
+	.pos = name##_scr_buf,\
+	.scr_mem_start = name##_scr_buf,\
+	.row_size = VCONS_DEFAULT_ROWS,\
+	.col_size = VCONS_DEFAULT_COLS,\
+	.trans_table = vt100,\
+	.state = ESnormal,\
+	.en = CONS_ENABLE,\
+	.id = 0,\
+};\
+nr_shell_st name = {\
+	.cons = &name##_vcons,\
+}
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif
-/******************* (C) COPYRIGHT 2019 Ji Youzhou *****END OF FILE*****************/
+/******************* (C) COPYRIGHT 2021 Ji Youzhou *****END OF FILE*****************/
