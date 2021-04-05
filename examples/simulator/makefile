@@ -14,7 +14,8 @@ TARGET_DEBUG := $(BIN_PATH)/$(TARGET_NAME)_db
 INC :=	../../inc/
 
 SRC := 	simulator.c \
-		../../src/nr_micro_shell.c
+		../../src/nr_micro_shell.c \
+		../../src/nr_virtual_console.c
 
 default : all
 
@@ -33,7 +34,5 @@ clean:
 	@echo CLEAN $(TARGET) $(TARGET_DEBUG)
 	@rm -f $(TARGET)
 	@rm -f $(TARGET_DEBUG)
-
-	
 
 

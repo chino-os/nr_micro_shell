@@ -9,6 +9,8 @@ DECLARE_AND_DEFAULT_NR_SHELL(shell);
 int main(void)
 {
     initscr();
+    cur_shell = &shell;
+    nr_printf("hello world!");
     dump_src_mem(shell.cons);
     fflush(stdout);
     char c;
@@ -17,7 +19,7 @@ int main(void)
         c = getch();
         printf("-->%x; ",c);
         fflush(stdout);
-        write_to_console(shell.cons,c);
+        nr_shell_get_char(cur_shell,c);
     }
     endwin();
     return 0;

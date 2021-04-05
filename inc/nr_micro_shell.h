@@ -59,12 +59,25 @@ enum {
 };
 
 enum { CONS_ENABLE = 1, CONS_DISABLE = 0 };
+struct virtual_cons;
 
-typedef struct scr_ops_struct {
-	void (*gotoxy)(uint8_t id, int x, int y);
-}scr_ops_st;
+typedef struct vcons_ops {
+	void (*cr)(struct virtual_cons*);
+	void (*lf)(struct virtual_cons*);
+	void (*bs)(struct virtual_cons*);
+	void (*del)(struct virtual_cons*);
+	void (*bel)(struct virtual_cons*);
+	void (*vt)(struct virtual_cons*);
+	void (*csi_J)(struct virtual_cons*, int);
+	void (*csi_K)(struct virtual_cons*, int);
+	void (*csi_A)(struct virtual_cons*);
+	void (*csi_B)(struct virtual_cons*);
+	void (*csi_C)(struct virtual_cons*);
+	void (*csi_D)(struct virtual_cons*);
+	void (*bell)(struct virtual_cons*);
+}vcons_ops_st;
 
-typedef struct virtual_console_struct {
+typedef struct virtual_cons {
 	uint32_t x;
 	uint32_t y;
 	uint32_t end_x;
@@ -78,36 +91,47 @@ typedef struct virtual_console_struct {
 
 	const uint8_t *trans_table;
 
+	uint16_t cur_type;
 	uint8_t state;
 	uint8_t npara;
-	uint16_t para[MAX_NR_CSI_PARA];
+	uint32_t para[MAX_NR_CSI_PARA];
+
+	
 
 	uint32_t en : 1;
 	uint32_t echo_en : 1;
 	uint32_t need_wrap : 1;
 	uint32_t auto_wrap : 1;
 	uint32_t insert : 1;
+	struct vcons_ops* ops;
 
-	scr_ops_st* src_ops;
+	void* data;
 
 	uint8_t id;
-} v_cons_st;
+} vcons_st;
 
-typedef struct nr_shell_struct
+typedef struct nr_shell
 {
-	v_cons_st *cons;
+	vcons_st *cons;
+	char user_name[];
 }nr_shell_st;
 
-void write_to_console(v_cons_st *cons, uint8_t c);
-void dump_src_mem(v_cons_st *cons);
+void write_to_console(vcons_st *cons, uint8_t c);
+void dump_src_mem(vcons_st *cons);
+void sync_with_real_screen(vcons_st *cons);
+void vscreen_down(vcons_st *cons, int x);
+void vscreen_up(vcons_st *cons, int x);
+void nr_shell_get_char(nr_shell_st *sh, char c);
 
 extern const char vt100[];
+extern nr_shell_st *cur_shell;
+void nr_printf(char *fmt, ...);
 
 #define VCONS_DEFAULT_COLS 80
 #define VCONS_DEFAULT_ROWS 80
 #define  DECLARE_AND_DEFAULT_NR_SHELL(name)\
 uint8_t name##_scr_buf[VCONS_DEFAULT_COLS*VCONS_DEFAULT_ROWS];\
-v_cons_st name##_vcons = {\
+vcons_st name##_vcons = {\
 	.x = 0,\
 	.y = 0,\
 	.pos = name##_scr_buf,\
@@ -121,6 +145,7 @@ v_cons_st name##_vcons = {\
 };\
 nr_shell_st name = {\
 	.cons = &name##_vcons,\
+	.user_name = "root",\
 }
 
 #ifdef __cplusplus
