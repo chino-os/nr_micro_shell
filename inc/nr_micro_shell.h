@@ -125,10 +125,11 @@ void nr_shell_get_char(nr_shell_st *sh, char c);
 
 extern const char vt100[];
 extern nr_shell_st *cur_shell;
+extern vcons_ops_st shell_vcons_ops;
 void nr_printf(char *fmt, ...);
 
-#define VCONS_DEFAULT_COLS 80
-#define VCONS_DEFAULT_ROWS 80
+#define VCONS_DEFAULT_COLS 4
+#define VCONS_DEFAULT_ROWS 2
 #define  DECLARE_AND_DEFAULT_NR_SHELL(name)\
 uint8_t name##_scr_buf[VCONS_DEFAULT_COLS*VCONS_DEFAULT_ROWS];\
 vcons_st name##_vcons = {\
@@ -142,6 +143,8 @@ vcons_st name##_vcons = {\
 	.state = ESnormal,\
 	.en = CONS_ENABLE,\
 	.id = 0,\
+	.ops = &shell_vcons_ops,\
+	.auto_wrap = 1,\
 };\
 nr_shell_st name = {\
 	.cons = &name##_vcons,\

@@ -145,21 +145,13 @@ static void gotoxy(vcons_st *cons, int x, int y)
 	y = y >= cons->row_size ? cons->row_size - 1 : x;
 }
 
-//static void csi_J(vcons_st *cons, int par)
-//{
-//}
-
-//static void csi_K(vcons_st *cons, int par)
-//{
-//}
-
 void dump_src_mem(vcons_st *cons)
 {
 	int i = 0;
 	int j = 0;
 	int k = 0;
 	printf("\r\n");
-	printf("\r\n===========================================================================================\r\n");
+	printf("\r\n======================================\r\n");
 
 	for (i = 0; i < cons->y; i++) {
 		for (j = 0; j < cons->col_size; j++) {
@@ -173,14 +165,12 @@ void dump_src_mem(vcons_st *cons)
 		nr_shell_putc(cons->scr_mem_start[k], cons->id);
 		k++;
 	}
-	printf("\r\n===========================================================================================\r\n");
-	printf("x:%d, y:%d\n", cons->x, cons->y);
+
+	printf("\r\n======================================\r\n");
+	printf("x:%d, y:%d\r\n", cons->x, cons->y);
+	printf("k:%d\r\n",k);
 	printf("\r\n");
 	fflush(stdout);
-}
-
-__weak void bell(void)
-{
 }
 
 void write_to_console(vcons_st *cons, uint8_t c)
@@ -189,16 +179,24 @@ void write_to_console(vcons_st *cons, uint8_t c)
 		return;
 
 	if (cons->state == ESnormal && cons->trans_table[c]) {
+		if(cons->need_wrap) {
+			__CALL_VCONS_OPS(cr);
+			__CALL_VCONS_OPS(lf);
+		}
 		if (cons->insert)
 			insert_char(cons);
 		c = cons->trans_table[c];
 		*cons->pos = c;
-		if (cons->x == cons->col_size)
+		dump_src_mem(cons);
+		if (cons->x >= cons->col_size - 1) {
 			cons->need_wrap = cons->auto_wrap;
+		}
 		else {
+			printf("cons->x %d, cons->col_size %d\r\n", cons->x,cons->col_size);
 			cons->x++;
 			cons->pos++;
 		}
+
 		return;
 	}
 
@@ -211,7 +209,6 @@ void write_to_console(vcons_st *cons, uint8_t c)
 		return;
 	case LF:
 		__CALL_VCONS_OPS(lf);
-		dump_src_mem(cons);
 		return;
 	case CR:
 		__CALL_VCONS_OPS(cr);

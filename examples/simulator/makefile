@@ -27,7 +27,7 @@ all:
 .PHONY: debug
 debug: 
 	@rm -f $(TARGET_DEBUG)
-	$(CC) $(CCFLAG) $(DGBFLAG) -I $(INC) -D NR_MICRO_SHELL_SIMULATOR $(SRC) -o $(TARGET_DEBUG)
+	$(CC) $(CCFLAG) $(DGBFLAG) -I $(INC) -D NR_MICRO_SHELL_SIMULATOR $(SRC) -l curses -o $(TARGET_DEBUG)
 
 .PHONY: clean
 clean:

@@ -10,7 +10,7 @@ int main(void)
 {
     initscr();
     cur_shell = &shell;
-    nr_printf("hello world!");
+    //nr_printf("ooook");
     dump_src_mem(shell.cons);
     fflush(stdout);
     char c;
