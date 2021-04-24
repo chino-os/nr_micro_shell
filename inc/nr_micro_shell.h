@@ -70,10 +70,10 @@ typedef struct vcons_ops {
 	void (*vt)(struct virtual_cons*);
 	void (*csi_J)(struct virtual_cons*, int);
 	void (*csi_K)(struct virtual_cons*, int);
-	void (*csi_A)(struct virtual_cons*);
-	void (*csi_B)(struct virtual_cons*);
-	void (*csi_C)(struct virtual_cons*);
-	void (*csi_D)(struct virtual_cons*);
+	void (*csi_A)(struct virtual_cons*, int);
+	void (*csi_B)(struct virtual_cons*, int);
+	void (*csi_C)(struct virtual_cons*, int);
+	void (*csi_D)(struct virtual_cons*, int);
 	void (*bell)(struct virtual_cons*);
 }vcons_ops_st;
 
@@ -95,8 +95,6 @@ typedef struct virtual_cons {
 	uint8_t state;
 	uint8_t npara;
 	uint32_t para[MAX_NR_CSI_PARA];
-
-	
 
 	uint32_t en : 1;
 	uint32_t echo_en : 1;
@@ -122,14 +120,15 @@ void sync_with_real_screen(vcons_st *cons);
 void vscreen_down(vcons_st *cons, int x);
 void vscreen_up(vcons_st *cons, int x);
 void nr_shell_get_char(nr_shell_st *sh, char c);
+void nr_shell_init(nr_shell_st *shell);
 
 extern const char vt100[];
 extern nr_shell_st *cur_shell;
 extern vcons_ops_st shell_vcons_ops;
 void nr_printf(char *fmt, ...);
 
-#define VCONS_DEFAULT_COLS 4
-#define VCONS_DEFAULT_ROWS 2
+#define VCONS_DEFAULT_COLS 80
+#define VCONS_DEFAULT_ROWS 20
 #define  DECLARE_AND_DEFAULT_NR_SHELL(name)\
 uint8_t name##_scr_buf[VCONS_DEFAULT_COLS*VCONS_DEFAULT_ROWS];\
 vcons_st name##_vcons = {\

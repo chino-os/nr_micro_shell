@@ -12,6 +12,7 @@ int main(void)
     cur_shell = &shell;
     //nr_printf("ooook");
     dump_src_mem(shell.cons);
+    nr_shell_init(&shell);
     fflush(stdout);
     char c;
     while(1)

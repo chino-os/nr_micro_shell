@@ -58,7 +58,7 @@ const char vt100[] = {
 	do {                                                                   \
 		if (cons != NULL && cons->ops != NULL &&                       \
 		    cons->ops->fun != NULL)                                    \
-			cons->ops->fun(cons, ##__VA_ARGS__);                     \
+			cons->ops->fun(cons, ##__VA_ARGS__);                   \
 	} while (0)
 #define __CALL_VCONS_OPS(fun, ...) CALL_VCONS_OPS(cons, fun, ##__VA_ARGS__)
 
@@ -150,6 +150,27 @@ void dump_src_mem(vcons_st *cons)
 	int i = 0;
 	int j = 0;
 	int k = 0;
+	char* ptr = cons->scr_mem_start;
+	printf("\r\n");
+	printf("\r\n======================================\r\n");
+
+	for (i = 0; i <= cons->y; i++) {
+
+		printf("%s\r\n");
+	}
+
+	printf("\r\n======================================\r\n");
+	printf("x:%d, y:%d\r\n", cons->x, cons->y);
+	printf("k:%d\r\n", k);
+	printf("\r\n");
+	fflush(stdout);
+}
+
+void dump_src_mem_raw(vcons_st *cons)
+{
+	int i = 0;
+	int j = 0;
+	int k = 0;
 	printf("\r\n");
 	printf("\r\n======================================\r\n");
 
@@ -168,7 +189,7 @@ void dump_src_mem(vcons_st *cons)
 
 	printf("\r\n======================================\r\n");
 	printf("x:%d, y:%d\r\n", cons->x, cons->y);
-	printf("k:%d\r\n",k);
+	printf("k:%d\r\n", k);
 	printf("\r\n");
 	fflush(stdout);
 }
@@ -179,7 +200,7 @@ void write_to_console(vcons_st *cons, uint8_t c)
 		return;
 
 	if (cons->state == ESnormal && cons->trans_table[c]) {
-		if(cons->need_wrap) {
+		if (cons->need_wrap) {
 			__CALL_VCONS_OPS(cr);
 			__CALL_VCONS_OPS(lf);
 		}
@@ -187,12 +208,11 @@ void write_to_console(vcons_st *cons, uint8_t c)
 			insert_char(cons);
 		c = cons->trans_table[c];
 		*cons->pos = c;
-		dump_src_mem(cons);
 		if (cons->x >= cons->col_size - 1) {
 			cons->need_wrap = cons->auto_wrap;
-		}
-		else {
-			printf("cons->x %d, cons->col_size %d\r\n", cons->x,cons->col_size);
+		} else {
+			printf("cons->x %d, cons->col_size %d\r\n", cons->x,
+			       cons->col_size);
 			cons->x++;
 			cons->pos++;
 		}
@@ -264,15 +284,23 @@ void write_to_console(vcons_st *cons, uint8_t c)
 		case 'A':
 			if (!cons->para[0])
 				cons->para[0]++;
-			gotoxy(cons, cons->x, cons->y - cons->para[0]);
+			__CALL_VCONS_OPS(csi_A, cons->para[0]);
 			return;
 		case 'B':
+			if (!cons->para[0])
+				cons->para[0]++;
+			__CALL_VCONS_OPS(csi_B, cons->para[0]);
+			return;
 		case 'e':
 			if (!cons->para[0])
 				cons->para[0]++;
 			gotoxy(cons, cons->x, cons->y + cons->para[0]);
 			return;
 		case 'C':
+			if (!cons->para[0])
+				cons->para[0]++;
+			__CALL_VCONS_OPS(csi_C, cons->para[0]);
+			return;
 		case 'a':
 			if (!cons->para[0])
 				cons->para[0]++;
@@ -281,7 +309,7 @@ void write_to_console(vcons_st *cons, uint8_t c)
 		case 'D':
 			if (!cons->para[0])
 				cons->para[0]++;
-			gotoxy(cons, cons->x - cons->para[0], cons->y);
+			__CALL_VCONS_OPS(csi_D, cons->para[0]);
 			return;
 		case 'E':
 			if (!cons->para[0])
@@ -307,10 +335,10 @@ void write_to_console(vcons_st *cons, uint8_t c)
 			gotoxy(cons, cons->para[1], cons->para[0]);
 			return;
 		case 'J':
-			__CALL_VCONS_OPS(csi_J,cons->para[0]);
+			__CALL_VCONS_OPS(csi_J, cons->para[0]);
 			return;
 		case 'K':
-			__CALL_VCONS_OPS(csi_K,cons->para[0]);
+			__CALL_VCONS_OPS(csi_K, cons->para[0]);
 			return;
 		}
 		return;
@@ -321,5 +349,4 @@ void write_to_console(vcons_st *cons, uint8_t c)
 
 void sync_with_real_screen(vcons_st *cons)
 {
-
 }
