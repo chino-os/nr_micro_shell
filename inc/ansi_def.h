@@ -39,6 +39,7 @@
 /* Define to prevent recursive inclusion -------------------------------------*/
 #ifndef __ansi_def_h
 #define __ansi_def_h
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -64,7 +65,7 @@ extern "C"
         char current_line[NR_ANSI_LINE_SIZE];
 
         char combine_buf[NR_ANSI_CTRL_MAX_LEN];
-        char cmd_num;
+        uint8_t cmd_num;
         char combine_state;
     } ansi_st;
 
