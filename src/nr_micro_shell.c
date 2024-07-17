@@ -107,17 +107,16 @@ shell_fun_t shell_search_cmd(shell_st *shell, char *str) {
 
 void shell_parser(shell_st *shell, char *str) {
     size_t argc = 0;
-    char argv[NR_SHELL_CMD_LINE_MAX_LENGTH + NR_SHELL_CMD_PARAS_MAX_NUM];
+    char *argv[NR_SHELL_CMD_PARAS_MAX_NUM];
     char *token = str;
     shell_fun_t fp;
-    char index = NR_SHELL_CMD_PARAS_MAX_NUM;
 
     if (shell_his_queue_search_cmd(&shell->cmd_his, str) == 0 && str[0] != '\0') {
         shell_his_queue_add_cmd(&shell->cmd_his, str);
     }
 
     if (strlen(str) > NR_SHELL_CMD_LINE_MAX_LENGTH) {
-        shell_printf("this command is too long." NR_SHELL_NEXT_LINE);
+        shell_printf("sh: command too long." NR_SHELL_NEXT_LINE);
         shell_printf("%s", shell->user_name);
         return;
     }
@@ -127,19 +126,15 @@ void shell_parser(shell_st *shell, char *str) {
 
     if (fp == NULL) {
         if (isalpha(str[0])) {
-            shell_printf("no command named: %s" NR_SHELL_NEXT_LINE, token);
+            shell_printf("sh: command not found: %s" NR_SHELL_NEXT_LINE, token);
         }
     } else {
-        argv[argc] = index;
-        strcpy(argv + index, str);
-        index += strlen(str) + 1;
+        argv[argc] = token;
         argc++;
 
         token = nr_shell_strtok(NULL, " ");
         while (token != NULL) {
-            argv[argc] = index;
-            strcpy(argv + index, token);
-            index += strlen(token) + 1;
+            argv[argc] = token;
             argc++;
             token = nr_shell_strtok(NULL, " ");
         }
