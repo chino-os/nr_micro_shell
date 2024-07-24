@@ -6,6 +6,7 @@ set(SRCS src/ansi.c
          src/nr_micro_shell.c
          src/commands/cat.cpp
          src/commands/echo.cpp
+         src/commands/serial.cpp
          src/commands/uname.cpp
 )
 

@@ -5,8 +5,11 @@
 
 using namespace chino::shell;
 
-extern "C" const static_cmd_st static_cmd[] = {
-    {"cat", commands::cat}, {"echo", commands::echo}, {"uname", commands::uname}, {"\0", NULL}};
+extern "C" const static_cmd_st static_cmd[] = {{"cat", commands::cat},
+                                               {"echo", commands::echo},
+                                               {"serial", commands::serial},
+                                               {"uname", commands::uname},
+                                               {"\0", NULL}};
 
 int main(int argc, char *argv[]) {
     char c;
