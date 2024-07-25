@@ -49,23 +49,23 @@ static void commands::serial(int argc, char *argv[]) {
     tcsetattr(sfd, TCSAFLUSH, &tty);
 
     while (true) {
-        auto c = getchar();
-        if (c == -1) {
+        auto wc = getchar();
+        if (wc == -1) {
+            break;
+        } else if (wc == 0x3) { // CTRL+C
+            puts("");
             break;
         }
-        write(sfd, &c, 1);
+        write(sfd, &wc, 1);
 
         while (true) {
-            auto ret = read(sfd, &c, 1);
+            char rc;
+            auto ret = read(sfd, &rc, 1);
             if (ret == -1) {
                 fprintf(stderr, "Error %i from read: %s\n", errno, strerror(errno));
                 goto end;
             } else if (ret) {
-                if (c == 0x3) { // CTRL+C
-                    puts("");
-                    goto end;
-                }
-                write(STDOUT_FILENO, &c, 1);
+                write(STDOUT_FILENO, &rc, 1);
             } else {
                 break;
             }
