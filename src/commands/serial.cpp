@@ -61,16 +61,13 @@ static void commands::serial(int argc, char *argv[]) {
         while (true) {
             char rc;
             auto ret = read(sfd, &rc, 1);
-            if (ret == -1) {
-                fprintf(stderr, "Error %i from read: %s\n", errno, strerror(errno));
-                goto end;
-            } else if (ret) {
+            if (ret > 0) {
                 write(STDOUT_FILENO, &rc, 1);
             } else {
                 break;
             }
         }
     }
-end:
+
     close(sfd);
 }
