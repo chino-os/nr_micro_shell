@@ -3,6 +3,7 @@
 #include "commands.h"
 #include <array>
 #include <cerrno>
+#include <chino/os/ioapi.h>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -11,6 +12,7 @@
 #include <unistd.h>
 
 using namespace chino;
+using namespace chino::os;
 using namespace chino::shell;
 
 static void commands::serial(int argc, char *argv[]) {
@@ -37,7 +39,7 @@ static void commands::serial(int argc, char *argv[]) {
     tty.c_cflag |= CS8;            // 8 bits per byte (most common)
     tty.c_cflag &= ~CRTSCTS;       // Disable RTS/CTS hardware flow control (most common)
     tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines (CLOCAL = 1)
-    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VMIN] = 1;
     tty.c_cc[VTIME] = 1; // timeout 100ms
 
     speed_t baudrate = 115200;
@@ -48,26 +50,50 @@ static void commands::serial(int argc, char *argv[]) {
     tcflush(sfd, TCIOFLUSH);
     tcsetattr(sfd, TCSAFLUSH, &tty);
 
-    while (true) {
-        auto wc = getchar();
-        if (wc == -1) {
-            break;
-        } else if (wc == 0x3) { // CTRL+C
-            puts("");
-            break;
-        }
-        write(sfd, &wc, 1);
+    char stdin_c;
+    char serial_in_c;
+    bool stdin_ready = false;
+    bool serial_in_ready = false;
 
-        while (true) {
-            char rc;
-            auto ret = read(sfd, &rc, 1);
-            if (ret > 0) {
-                write(STDOUT_FILENO, &rc, 1);
-            } else {
-                break;
-            }
-        }
+    async_io_result stdin_io;
+    async_io_result serial_in_io;
+
+    if (read_async(STDIN_FILENO, {reinterpret_cast<std::byte *>(&stdin_c), 1}, 0, stdin_io).is_ok()) {
+        stdin_ready = true;
     }
 
+    if (read_async(sfd, {reinterpret_cast<std::byte *>(&serial_in_c), 1}, 0, serial_in_io).is_ok()) {
+        serial_in_ready = true;
+    }
+
+    while (true) {
+        while (stdin_ready) {
+            stdin_ready = false;
+            if (stdin_c == 0x3) { // CTRL+C
+                puts("");
+                goto end;
+            }
+            write(sfd, &stdin_c, 1);
+            if (read_async(STDIN_FILENO, {reinterpret_cast<std::byte *>(&stdin_c), 1}, 0, stdin_io).is_ok()) {
+                stdin_ready = true;
+            }
+        }
+
+        while (serial_in_ready) {
+            serial_in_ready = false;
+            write(STDOUT_FILENO, &serial_in_c, 1);
+            if (read_async(sfd, {reinterpret_cast<std::byte *>(&serial_in_c), 1}, 0, serial_in_io).is_ok()) {
+                serial_in_ready = true;
+            }
+        }
+
+        auto ready_io = wait_queued_io().unwrap();
+        if (ready_io == &stdin_io)
+            stdin_ready = true;
+        else if (ready_io == &serial_in_io)
+            serial_in_ready = true;
+    }
+
+end:
     close(sfd);
 }
