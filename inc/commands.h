@@ -6,6 +6,7 @@
 namespace chino::shell::commands {
 void cat(int argc, char *argv[]);
 void echo(int argc, char *argv[]);
+void ping(int argc, char *argv[]);
 void serial(int argc, char *argv[]);
 void uname(int argc, char *argv[]);
 } // namespace chino::shell::commands
