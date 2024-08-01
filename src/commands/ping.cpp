@@ -7,10 +7,6 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
-#include <lwip/icmp.h>
-#include <lwip/inet_chksum.h>
-#include <lwip/raw.h>
-#include <lwip/timeouts.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -139,8 +135,7 @@ static void ping_recv(int s) {
 #if LWIP_IPV4
             if (from.ss_family == AF_INET) {
                 struct sockaddr_in *from4 = (struct sockaddr_in *)&from;
-                //inet_addr_to_ip4addr(ip_2_ip4(&fromaddr), &from4->sin_addr);
-                IP_SET_TYPE_VAL(fromaddr, IPADDR_TYPE_V4);
+                fromaddr.addr = from4->sin_addr.s_addr;
             }
 #endif /* LWIP_IPV4 */
 
