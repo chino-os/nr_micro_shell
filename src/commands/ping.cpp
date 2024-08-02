@@ -207,7 +207,9 @@ static void ping_recv(int s) {
                 break;
             }
 
-            printf("ping: recv %" PRId32 " %" PRIu32 "ms\n", fromaddr, current_ms() - ping_time);
+            auto addr_le = ntohl(fromaddr);
+            printf("ping: recv %d.%d.%d.%d %" PRIu32 "ms\n", addr_le >> 24, (addr_le >> 16) & 0xFF,
+                   (addr_le >> 8) & 0xFF, addr_le & 0xFF, current_ms() - ping_time);
 
             struct iphdr *iphdr;
             struct icmp_echo_hdr *iecho;
@@ -257,12 +259,27 @@ static void commands::ping(int argc, char *argv[]) {
         return;
     }
 
+    async_io_result stdin_io{};
+    char in_c;
+    (void)read_async(STDIN_FILENO, {reinterpret_cast<std::byte *>(&in_c), 1}, 0, stdin_io);
+
     while (1) {
+        ping_time = current_ms();
         if (ping_send(s, ping_target).is_ok()) {
-            ping_time = current_ms();
             ping_recv(s);
         } else {
             printf("error: %s\n", strerror(errno));
+        }
+
+        if (stdin_io.bytes_transferred == 1) {
+            if (in_c == 0x3) { // CTRL+C
+                puts("");
+                break;
+            } else {
+                stdin_io = {};
+                (void)read_async(STDIN_FILENO, {reinterpret_cast<std::byte *>(&in_c), 1}, 0, stdin_io);
+            }
+            (void)wait_queued_io();
         }
         sleep(1);
     }
