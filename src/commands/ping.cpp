@@ -2,27 +2,24 @@
 // Licensed under the Apache license. See LICENSE file in the project root for full license information.
 #include "commands.h"
 #include <array>
+#include <cassert>
 #include <cerrno>
 #include <chino/os/ioapi.h>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <fcntl.h>
-#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
 
 using namespace chino;
 using namespace chino::os;
 using namespace chino::shell;
-
-/**
- * PING_DEBUG: Enable debugging for PING.
- */
-#ifndef PING_DEBUG
-#define PING_DEBUG LWIP_DBG_ON
-#endif
 
 /** ping receive timeout - in milliseconds */
 #ifndef PING_RCV_TIMEO
@@ -34,7 +31,7 @@ using namespace chino::shell;
 #define PING_DELAY 1000
 #endif
 
-/** ping identifier - must fit on a u16_t */
+/** ping identifier - must fit on a uint16_t */
 #ifndef PING_ID
 #define PING_ID 0xAFAF
 #endif
@@ -44,28 +41,124 @@ using namespace chino::shell;
 #define PING_DATA_SIZE 32
 #endif
 
+constexpr size_t ping_size = sizeof(struct icmp_echo_hdr) + PING_DATA_SIZE;
+static_assert(ping_size <= 0xffff);
+
 /** ping result action - no default action */
 #ifndef PING_RESULT
 #define PING_RESULT(ping_ok)
 #endif
 
 /* ping variables */
-static const ip_addr_t *ping_target;
-static u16_t ping_seq_num;
+static uint16_t ping_seq_num;
 // #ifdef LWIP_DEBUG
-static u32_t ping_time;
+static uint32_t ping_time;
 // #endif /* LWIP_DEBUG */
 
+/** Swap the bytes in an u16_t: much like lwip_htons() for little-endian */
+#ifndef SWAP_BYTES_IN_WORD
+#define SWAP_BYTES_IN_WORD(w) (((w) & 0xff) << 8) | (((w) & 0xff00) >> 8)
+#endif /* SWAP_BYTES_IN_WORD */
+
+/** Split an u32_t in two u16_ts and add them up */
+#ifndef FOLD_U32T
+#define FOLD_U32T(u) ((uint32_t)(((u) >> 16) + ((u) & 0x0000ffffUL)))
+#endif
+
+static uint32_t current_ms() {
+    timespec cnt_time;
+    timespec_get(&cnt_time, TIME_UTC);
+    return cnt_time.tv_sec * 1000 + cnt_time.tv_nsec / 1000000;
+}
+
+/**
+ * An optimized checksum routine. Basically, it uses loop-unrolling on
+ * the checksum loop, treating the head and tail bytes specially, whereas
+ * the inner loop acts on 8 bytes at a time.
+ *
+ * @arg start of buffer to be checksummed. May be an odd byte address.
+ * @len number of bytes in the buffer to be checksummed.
+ * @return host order (!) lwip checksum (non-inverted Internet sum)
+ *
+ * by Curt McDowell, Broadcom Corp. December 8th, 2005
+ */
+static uint16_t inet_chksum(const void *dataptr, int len) {
+    const uint8_t *pb = (const uint8_t *)dataptr;
+    const uint16_t *ps;
+    uint16_t t = 0;
+    const uint32_t *pl;
+    uint32_t sum = 0, tmp;
+    /* starts at odd byte address? */
+    int odd = ((uintptr_t)pb & 1);
+
+    if (odd && len > 0) {
+        ((uint8_t *)&t)[1] = *pb++;
+        len--;
+    }
+
+    ps = (const uint16_t *)(const void *)pb;
+
+    if (((uintptr_t)ps & 3) && len > 1) {
+        sum += *ps++;
+        len -= 2;
+    }
+
+    pl = (const uint32_t *)(const void *)ps;
+
+    while (len > 7) {
+        tmp = sum + *pl++; /* ping */
+        if (tmp < sum) {
+            tmp++; /* add back carry */
+        }
+
+        sum = tmp + *pl++; /* pong */
+        if (sum < tmp) {
+            sum++; /* add back carry */
+        }
+
+        len -= 8;
+    }
+
+    /* make room in upper bits */
+    sum = FOLD_U32T(sum);
+
+    ps = (const uint16_t *)pl;
+
+    /* 16-bit aligned word remaining? */
+    while (len > 1) {
+        sum += *ps++;
+        len -= 2;
+    }
+
+    /* dangling tail byte remaining? */
+    if (len > 0) { /* include odd byte */
+        ((uint8_t *)&t)[0] = *(const uint8_t *)ps;
+    }
+
+    sum += t; /* add end bytes */
+
+    /* Fold 32-bit sum to 16 bits
+       calling this twice is probably faster than if statements... */
+    sum = FOLD_U32T(sum);
+    sum = FOLD_U32T(sum);
+
+    if (odd) {
+        sum = SWAP_BYTES_IN_WORD(sum);
+    }
+
+    return (uint16_t)sum;
+}
+
 /** Prepare a echo ICMP request */
-static void ping_prepare_echo(struct icmp_echo_hdr *iecho, u16_t len) {
+static void ping_prepare_echo(struct icmp_echo_hdr *iecho, uint16_t len) {
     size_t i;
     size_t data_len = len - sizeof(struct icmp_echo_hdr);
 
-    ICMPH_TYPE_SET(iecho, ICMP_ECHO);
-    ICMPH_CODE_SET(iecho, 0);
+    iecho->type = ICMP_ECHO;
+    iecho->code = 0;
     iecho->chksum = 0;
     iecho->id = PING_ID;
-    iecho->seqno = lwip_htons(++ping_seq_num);
+    iecho->seqno = htons(++ping_seq_num);
 
     /* fill the additional data buffer with some data */
     for (i = 0; i < data_len; i++) {
@@ -76,49 +169,25 @@ static void ping_prepare_echo(struct icmp_echo_hdr *iecho, u16_t len) {
 }
 
 /* Ping using the socket ip */
-static err_t ping_send(int s, const ip_addr_t *addr) {
-    int err;
+static result<void> ping_send(int s, in_addr_t addr) {
     struct icmp_echo_hdr *iecho;
     struct sockaddr_storage to;
-    size_t ping_size = sizeof(struct icmp_echo_hdr) + PING_DATA_SIZE;
-    LWIP_ASSERT("ping_size is too big", ping_size <= 0xffff);
+    uint8_t ping_buf[ping_size];
 
-#if LWIP_IPV6
-    if (IP_IS_V6(addr) && !ip6_addr_isipv4mappedipv6(ip_2_ip6(addr))) {
-        /* todo: support ICMP6 echo */
-        return ERR_VAL;
-    }
-#endif /* LWIP_IPV6 */
-
-    iecho = (struct icmp_echo_hdr *)mem_malloc((mem_size_t)ping_size);
+    iecho = (struct icmp_echo_hdr *)ping_buf;
     if (!iecho) {
-        return ERR_MEM;
+        return err(error_code::out_of_memory);
     }
 
-    ping_prepare_echo(iecho, (u16_t)ping_size);
+    ping_prepare_echo(iecho, (uint16_t)ping_size);
 
-#if LWIP_IPV4
-    if (IP_IS_V4(addr)) {
-        struct sockaddr_in *to4 = (struct sockaddr_in *)&to;
-        to4->sin_family = AF_INET;
-        //inet_addr_from_ip4addr(&to4->sin_addr, ip_2_ip4(addr));
-    }
-#endif /* LWIP_IPV4 */
+    struct sockaddr_in *to4 = (struct sockaddr_in *)&to;
+    to4->sin_family = AF_INET;
+    to4->sin_addr.s_addr = addr;
 
-#if LWIP_IPV6
-    if (IP_IS_V6(addr)) {
-        struct sockaddr_in6 *to6 = (struct sockaddr_in6 *)&to;
-        to6->sin6_len = sizeof(*to6);
-        to6->sin6_family = AF_INET6;
-        inet6_addr_from_ip6addr(&to6->sin6_addr, ip_2_ip6(addr));
-    }
-#endif /* LWIP_IPV6 */
-
-    err = sendto(s, iecho, ping_size, 0, (struct sockaddr *)&to, sizeof(to));
-
-    mem_free(iecho);
-
-    return (err ? ERR_OK : ERR_VAL);
+    return sendto(s, iecho, ping_size, 0, (struct sockaddr *)&to, sizeof(sockaddr_in)) > 0
+               ? ok()
+               : err(error_code::invalid_argument);
 }
 
 static void ping_recv(int s) {
@@ -128,56 +197,35 @@ static void ping_recv(int s) {
     int fromlen = sizeof(from);
 
     while ((len = recvfrom(s, buf, sizeof(buf), 0, (struct sockaddr *)&from, (socklen_t *)&fromlen)) > 0) {
-        if (len >= (int)(sizeof(struct ip_hdr) + sizeof(struct icmp_echo_hdr))) {
-            ip_addr_t fromaddr;
-            memset(&fromaddr, 0, sizeof(fromaddr));
+        if (len >= (int)(sizeof(struct iphdr) + sizeof(struct icmp_echo_hdr))) {
+            in_addr_t fromaddr = 0;
 
-#if LWIP_IPV4
             if (from.ss_family == AF_INET) {
                 struct sockaddr_in *from4 = (struct sockaddr_in *)&from;
-                fromaddr.addr = from4->sin_addr.s_addr;
+                fromaddr = from4->sin_addr.s_addr;
+            } else {
+                break;
             }
-#endif /* LWIP_IPV4 */
 
-#if LWIP_IPV6
-            if (from.ss_family == AF_INET6) {
-                struct sockaddr_in6 *from6 = (struct sockaddr_in6 *)&from;
-                inet6_addr_to_ip6addr(ip_2_ip6(&fromaddr), &from6->sin6_addr);
-                IP_SET_TYPE_VAL(fromaddr, IPADDR_TYPE_V6);
+            printf("ping: recv %" PRId32 " %" PRIu32 "ms\n", fromaddr, current_ms() - ping_time);
+
+            struct iphdr *iphdr;
+            struct icmp_echo_hdr *iecho;
+
+            iphdr = (struct iphdr *)buf;
+            iecho = (struct icmp_echo_hdr *)(buf + iphdr->ihl * 4);
+            if ((iecho->id == PING_ID) && (iecho->seqno == htons(ping_seq_num))) {
+                return;
+            } else {
+                printf("ping: drop\n");
             }
-#endif /* LWIP_IPV6 */
-
-            LWIP_DEBUGF(PING_DEBUG, ("ping: recv "));
-            ip_addr_debug_print_val(PING_DEBUG, fromaddr);
-            LWIP_DEBUGF(PING_DEBUG, (" %" U32_F " ms\n", (sys_now() - ping_time)));
-
-            /* todo: support ICMP6 echo */
-#if LWIP_IPV4
-            if (IP_IS_V4_VAL(fromaddr)) {
-                struct ip_hdr *iphdr;
-                struct icmp_echo_hdr *iecho;
-
-                iphdr = (struct ip_hdr *)buf;
-                iecho = (struct icmp_echo_hdr *)(buf + (IPH_HL(iphdr) * 4));
-                if ((iecho->id == PING_ID) && (iecho->seqno == lwip_htons(ping_seq_num))) {
-                    /* do some ping result processing */
-                    PING_RESULT((ICMPH_TYPE(iecho) == ICMP_ER));
-                    return;
-                } else {
-                    LWIP_DEBUGF(PING_DEBUG, ("ping: drop\n"));
-                }
-            }
-#endif /* LWIP_IPV4 */
         }
         fromlen = sizeof(from);
     }
 
     if (len == 0) {
-        LWIP_DEBUGF(PING_DEBUG, ("ping: recv - %" U32_F " ms - timeout\n", (sys_now() - ping_time)));
+        printf("ping: recv - %" PRIu32 " ms - timeout\n", current_ms() - ping_time);
     }
-
-    /* do some ping result processing */
-    PING_RESULT(0);
 }
 
 static void commands::ping(int argc, char *argv[]) {
@@ -186,54 +234,37 @@ static void commands::ping(int argc, char *argv[]) {
         return;
     }
 
-    auto s = open("/dev/net/tcp", O_RDWR);
-    if (s == -1) {
-        fprintf(stderr, "%s: Error on opening %s: %s\n", argv[0], argv[1], strerror(errno));
+    in_addr_t ping_target = 0;
+    if (inet_pton(AF_INET, argv[1], &ping_target) != 1) {
+        fprintf(stderr, "%s: invalid address: %s\n", argv[0], argv[1]);
         return;
     }
 
-    int ret;
+    printf("PING %s %d bytes of data.\n", argv[1], (int)ping_size);
 
-#if LWIP_SO_SNDRCVTIMEO_NONSTANDARD
-    int timeout = PING_RCV_TIMEO;
-#else
     struct timeval timeout;
     timeout.tv_sec = PING_RCV_TIMEO / 1000;
     timeout.tv_usec = (PING_RCV_TIMEO % 1000) * 1000;
-#endif
 
-#if LWIP_IPV6
-    if (IP_IS_V4(ping_target) || ip6_addr_isipv4mappedipv6(ip_2_ip6(ping_target))) {
-        s = lwip_socket(AF_INET6, SOCK_RAW, IP_PROTO_ICMP);
-    } else {
-        s = lwip_socket(AF_INET6, SOCK_RAW, IP6_NEXTH_ICMP6);
-    }
-#else
-    s = socket(AF_INET, SOCK_RAW, IP_PROTO_ICMP);
-#endif
+    auto s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (s < 0) {
+        fprintf(stderr, "%s: open socket failed: %s\n", argv[0], strerror(errno));
         return;
     }
 
-    ret = setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    LWIP_ASSERT("setting receive timeout failed", ret == 0);
+    if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+        fprintf(stderr, "%s: setting receive timeout failed: %s\n", argv[0], strerror(errno));
+        return;
+    }
 
-    while (ping_target != NULL) {
-        if (ping_send(s, ping_target) == ERR_OK) {
-            LWIP_DEBUGF(PING_DEBUG, ("ping: send "));
-            ip_addr_debug_print(PING_DEBUG, ping_target);
-            LWIP_DEBUGF(PING_DEBUG, ("\n"));
-
-#ifdef LWIP_DEBUG
-            ping_time = sys_now();
-#endif /* LWIP_DEBUG */
+    while (1) {
+        if (ping_send(s, ping_target).is_ok()) {
+            ping_time = current_ms();
             ping_recv(s);
         } else {
-            LWIP_DEBUGF(PING_DEBUG, ("ping: send "));
-            ip_addr_debug_print(PING_DEBUG, ping_target);
-            LWIP_DEBUGF(PING_DEBUG, (" - error\n"));
+            printf("error: %s\n", strerror(errno));
         }
-        sys_msleep(PING_DELAY);
+        sleep(1);
     }
 
     close(s);
