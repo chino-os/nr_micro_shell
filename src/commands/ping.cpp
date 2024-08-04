@@ -49,12 +49,6 @@ static_assert(ping_size <= 0xffff);
 #define PING_RESULT(ping_ok)
 #endif
 
-/* ping variables */
-static uint16_t ping_seq_num;
-// #ifdef LWIP_DEBUG
-static uint32_t ping_time;
-// #endif /* LWIP_DEBUG */
-
 /** Swap the bytes in an u16_t: much like lwip_htons() for little-endian */
 #ifndef SWAP_BYTES_IN_WORD
 #define SWAP_BYTES_IN_WORD(w) (((w) & 0xff) << 8) | (((w) & 0xff00) >> 8)
@@ -146,89 +140,100 @@ static uint16_t inet_chksum(const void *dataptr, int len) {
         sum = SWAP_BYTES_IN_WORD(sum);
     }
 
-    return (uint16_t)sum;
+    return ~(uint16_t)sum;
 }
 
-/** Prepare a echo ICMP request */
-static void ping_prepare_echo(struct icmp_echo_hdr *iecho, uint16_t len) {
-    size_t i;
-    size_t data_len = len - sizeof(struct icmp_echo_hdr);
+class ping_context {
+  public:
+    /** Prepare a echo ICMP request */
+    void ping_prepare_echo(struct icmp_echo_hdr *iecho, uint16_t len) {
+        size_t i;
+        size_t data_len = len - sizeof(struct icmp_echo_hdr);
 
-    iecho->type = ICMP_ECHO;
-    iecho->code = 0;
-    iecho->chksum = 0;
-    iecho->id = PING_ID;
-    iecho->seqno = htons(++ping_seq_num);
+        iecho->type = ICMP_ECHO;
+        iecho->code = 0;
+        iecho->chksum = 0;
+        iecho->id = PING_ID;
+        iecho->seqno = htons(++ping_seq_num_);
 
-    /* fill the additional data buffer with some data */
-    for (i = 0; i < data_len; i++) {
-        ((char *)iecho)[sizeof(struct icmp_echo_hdr) + i] = (char)i;
-    }
-
-    iecho->chksum = inet_chksum(iecho, len);
-}
-
-/* Ping using the socket ip */
-static result<void> ping_send(int s, in_addr_t addr) {
-    struct icmp_echo_hdr *iecho;
-    struct sockaddr_storage to;
-    uint8_t ping_buf[ping_size];
-
-    iecho = (struct icmp_echo_hdr *)ping_buf;
-    if (!iecho) {
-        return err(error_code::out_of_memory);
-    }
-
-    ping_prepare_echo(iecho, (uint16_t)ping_size);
-
-    struct sockaddr_in *to4 = (struct sockaddr_in *)&to;
-    to4->sin_family = AF_INET;
-    to4->sin_addr.s_addr = addr;
-
-    return sendto(s, iecho, ping_size, 0, (struct sockaddr *)&to, sizeof(sockaddr_in)) > 0
-               ? ok()
-               : err(error_code::invalid_argument);
-}
-
-static void ping_recv(int s) {
-    char buf[64];
-    int len;
-    struct sockaddr_storage from;
-    int fromlen = sizeof(from);
-
-    while ((len = recvfrom(s, buf, sizeof(buf), 0, (struct sockaddr *)&from, (socklen_t *)&fromlen)) > 0) {
-        if (len >= (int)(sizeof(struct iphdr) + sizeof(struct icmp_echo_hdr))) {
-            in_addr_t fromaddr = 0;
-
-            if (from.ss_family == AF_INET) {
-                struct sockaddr_in *from4 = (struct sockaddr_in *)&from;
-                fromaddr = from4->sin_addr.s_addr;
-            } else {
-                break;
-            }
-
-            auto addr_le = ntohl(fromaddr);
-            printf("ping: recv %d.%d.%d.%d %" PRIu32 "ms\n", addr_le >> 24, (addr_le >> 16) & 0xFF,
-                   (addr_le >> 8) & 0xFF, addr_le & 0xFF, current_ms() - ping_time);
-
-            struct iphdr *iphdr;
-            struct icmp_echo_hdr *iecho;
-
-            iphdr = (struct iphdr *)buf;
-            iecho = (struct icmp_echo_hdr *)(buf + iphdr->ihl * 4);
-            if ((iecho->id == PING_ID) && (iecho->seqno == htons(ping_seq_num))) {
-                return;
-            } else {
-                printf("ping: drop\n");
-            }
+        /* fill the additional data buffer with some data */
+        for (i = 0; i < data_len; i++) {
+            ((char *)iecho)[sizeof(struct icmp_echo_hdr) + i] = (char)i;
         }
-        fromlen = sizeof(from);
+
+        iecho->chksum = inet_chksum(iecho, len);
     }
 
-    if (len == 0) {
-        printf("ping: recv - %" PRIu32 " ms - timeout\n", current_ms() - ping_time);
+    /* Ping using the socket ip */
+    result<void> ping_send(int s, in_addr_t addr) {
+        struct icmp_echo_hdr *iecho;
+        struct sockaddr_storage to {};
+        uint8_t ping_buf[ping_size];
+
+        iecho = (struct icmp_echo_hdr *)ping_buf;
+        if (!iecho) {
+            return err(error_code::out_of_memory);
+        }
+
+        ping_prepare_echo(iecho, (uint16_t)ping_size);
+
+        struct sockaddr_in *to4 = (struct sockaddr_in *)&to;
+        to4->sin_family = AF_INET;
+        to4->sin_addr.s_addr = addr;
+        to4->sin_port = 0;
+
+        ping_time_ = current_ms();
+        return sendto(s, iecho, ping_size, 0, (struct sockaddr *)&to, sizeof(sockaddr_in)) > 0
+                   ? ok()
+                   : err(error_code::invalid_argument);
     }
-}
+
+    void ping_recv(int s) {
+        char buf[64];
+        int len;
+        struct sockaddr_storage from;
+        int fromlen = sizeof(from);
+
+        while ((len = recvfrom(s, buf, sizeof(buf), 0, (struct sockaddr *)&from, (socklen_t *)&fromlen)) > 0) {
+            if (len >= (int)(sizeof(struct iphdr) + sizeof(struct icmp_echo_hdr))) {
+                in_addr_t fromaddr = 0;
+
+                if (from.ss_family == AF_INET) {
+                    struct sockaddr_in *from4 = (struct sockaddr_in *)&from;
+                    fromaddr = from4->sin_addr.s_addr;
+                } else {
+                    break;
+                }
+
+                auto addr_le = (uint32_t)ntohl(fromaddr);
+
+                struct iphdr *iphdr;
+                struct icmp_echo_hdr *iecho;
+
+                iphdr = (struct iphdr *)buf;
+                iecho = (struct icmp_echo_hdr *)(buf + iphdr->ihl * 4);
+                auto data_len = len - iphdr->ihl * 4 - sizeof(icmp_echo_hdr);
+                if ((iecho->id == PING_ID) && (iecho->seqno == htons(ping_seq_num_))) {
+                    printf("%u bytes from %u.%u.%u.%u: icmp_seq=%u ttl=%u time=%ums\n", (uint32_t)data_len,
+                           addr_le >> 24, (addr_le >> 16) & 0xFF, (addr_le >> 8) & 0xFF, addr_le & 0xFF,
+                           htons(iecho->seqno), iphdr->ttl, current_ms() - ping_time_);
+                    return;
+                } else {
+                    printf("ping: drop\n");
+                }
+            }
+            fromlen = sizeof(from);
+        }
+
+        if (len == 0) {
+            printf("ping: recv - %" PRIu32 " ms - timeout\n", current_ms() - ping_time_);
+        }
+    }
+
+  private:
+    uint16_t ping_seq_num_ = 0;
+    uint32_t ping_time_;
+};
 
 static void commands::ping(int argc, char *argv[]) {
     if (argc < 2) {
@@ -242,7 +247,7 @@ static void commands::ping(int argc, char *argv[]) {
         return;
     }
 
-    printf("PING %s %d bytes of data.\n", argv[1], (int)ping_size);
+    printf("PING %s %d bytes of data.\n", argv[1], (int)PING_DATA_SIZE);
 
     struct timeval timeout;
     timeout.tv_sec = PING_RCV_TIMEO / 1000;
@@ -263,10 +268,10 @@ static void commands::ping(int argc, char *argv[]) {
     char in_c;
     (void)read_async(STDIN_FILENO, {reinterpret_cast<std::byte *>(&in_c), 1}, 0, stdin_io);
 
+    ping_context pc;
     while (1) {
-        ping_time = current_ms();
-        if (ping_send(s, ping_target).is_ok()) {
-            ping_recv(s);
+        if (pc.ping_send(s, ping_target).is_ok()) {
+            pc.ping_recv(s);
         } else {
             printf("error: %s\n", strerror(errno));
         }
