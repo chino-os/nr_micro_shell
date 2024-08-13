@@ -9,7 +9,7 @@ extern "C" const static_cmd_st static_cmd[] = {{"cat", commands::cat},     {"ech
                                                {"ping", commands::ping},   {"serial", commands::serial},
                                                {"uname", commands::uname}, {"\0", NULL}};
 
-int main(int argc, char *argv[]) {
+int main() {
     char c;
     shell_init();
     while (1) {

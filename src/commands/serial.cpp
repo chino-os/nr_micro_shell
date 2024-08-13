@@ -1,7 +1,6 @@
 // Copyright (c) SunnyCase. All rights reserved.
 // Licensed under the Apache license. See LICENSE file in the project root for full license information.
 #include "commands.h"
-#include <array>
 #include <cerrno>
 #include <chino/os/ioapi.h>
 #include <cstdio>
@@ -15,7 +14,7 @@ using namespace chino;
 using namespace chino::os;
 using namespace chino::shell;
 
-static void commands::serial(int argc, char *argv[]) {
+void commands::serial(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <device> [baudrate=115200]\n", argv[0]);
         return;

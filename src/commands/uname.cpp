@@ -6,4 +6,4 @@
 using namespace chino;
 using namespace chino::shell;
 
-static void commands::uname(int argc, char *argv[]) { printf("Chino OS\n"); }
+void commands::uname(int, char *[]) { printf("Chino OS\n"); }

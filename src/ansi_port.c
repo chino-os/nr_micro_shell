@@ -49,8 +49,8 @@ void nr_ansi_common_char_slover(ansi_st *ansi, char x) {
     unsigned int i;
 
     if (ansi->counter < NR_ANSI_LINE_SIZE - 2) {
-        if (ansi->p < ansi->counter) {
-            for (i = ansi->counter; i > ansi->p; i--) {
+        if (ansi->p < (int32_t)ansi->counter) {
+            for (i = ansi->counter; (int32_t)i > ansi->p; i--) {
                 ansi->current_line[i] = ansi->current_line[i - 1];
             }
         }
@@ -61,7 +61,7 @@ void nr_ansi_common_char_slover(ansi_st *ansi, char x) {
         ansi->current_line[ansi->p] = x;
 
         ansi->current_line[ansi->counter] = '\0';
-        if (ansi->p + 1 < ansi->counter) {
+        if (ansi->p + 1 < (int32_t)ansi->counter) {
             shell_printf("\033[1@");
         }
 
@@ -70,7 +70,7 @@ void nr_ansi_common_char_slover(ansi_st *ansi, char x) {
 #endif
     } else {
         ansi->counter = NR_ANSI_LINE_SIZE - 3;
-        if (ansi->p >= ansi->counter) {
+        if (ansi->p >= (int32_t)ansi->counter) {
             ansi->p = ansi->counter - 1;
         }
         ansi->current_line[ansi->counter] = '\0';

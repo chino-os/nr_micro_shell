@@ -1,7 +1,6 @@
 // Copyright (c) SunnyCase. All rights reserved.
 // Licensed under the Apache license. See LICENSE file in the project root for full license information.
 #include "commands.h"
-#include <array>
 #include <cassert>
 #include <cerrno>
 #include <chino/os/ioapi.h>
@@ -214,9 +213,10 @@ class ping_context {
                 iecho = (struct icmp_echo_hdr *)(buf + iphdr->ihl * 4);
                 auto data_len = len - iphdr->ihl * 4 - sizeof(icmp_echo_hdr);
                 if ((iecho->id == PING_ID) && (iecho->seqno == htons(ping_seq_num_))) {
-                    printf("%u bytes from %u.%u.%u.%u: icmp_seq=%u ttl=%u time=%ums\n", (uint32_t)data_len,
-                           addr_le >> 24, (addr_le >> 16) & 0xFF, (addr_le >> 8) & 0xFF, addr_le & 0xFF,
-                           htons(iecho->seqno), iphdr->ttl, current_ms() - ping_time_);
+                    printf("%" PRIu32 "bytes from %" PRIu32 ".%" PRIu32 ".%" PRIu32 ".%" PRIu32
+                           ": icmp_seq=%u ttl=%" PRIi8 " time=%" PRIu32 "ms\n",
+                           (uint32_t)data_len, addr_le >> 24, (addr_le >> 16) & 0xFF, (addr_le >> 8) & 0xFF,
+                           addr_le & 0xFF, htons(iecho->seqno), iphdr->ttl, current_ms() - ping_time_);
                     return;
                 } else {
                     printf("ping: drop\n");
@@ -235,7 +235,7 @@ class ping_context {
     uint32_t ping_time_;
 };
 
-static void commands::ping(int argc, char *argv[]) {
+void commands::ping(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <address>\n", argv[0]);
         return;

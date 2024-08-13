@@ -6,8 +6,8 @@
 using namespace chino;
 using namespace chino::shell;
 
-static void commands::echo(int argc, char *argv[]) {
-    for (size_t i = 1; i < argc; i++) {
+void commands::echo(int argc, char *argv[]) {
+    for (int i = 1; i < argc; i++) {
         printf("%s ", argv[i]);
     }
     printf("\n");

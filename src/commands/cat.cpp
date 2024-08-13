@@ -11,8 +11,8 @@
 using namespace chino;
 using namespace chino::shell;
 
-static void commands::cat(int argc, char *argv[]) {
-    for (size_t i = 1; i < argc; i++) {
+void commands::cat(int argc, char *argv[]) {
+    for (int i = 1; i < argc; i++) {
         auto fd = open(argv[i], O_RDONLY);
         if (fd != -1) {
             char buf[64];
@@ -22,7 +22,7 @@ static void commands::cat(int argc, char *argv[]) {
                     fprintf(stderr, "cat: %s: %s\n", argv[i], strerror(errno));
                 } else {
                     write(STDOUT_FILENO, buf, size);
-                    if (size < std::size(buf))
+                    if (!size)
                         break;
                 }
             }
